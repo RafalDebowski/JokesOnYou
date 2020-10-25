@@ -3,6 +3,7 @@ package com.rafaldebowski.JokesOnYou.service.external;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.rafaldebowski.JokesOnYou.model.Joke;
 import com.rafaldebowski.JokesOnYou.model.JokeException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,8 +17,11 @@ import java.util.Set;
 
 public class Sv443JokeProvider implements ExternalJokeProvider {
 
+    public static final String SERVICE_IS_UNAVAILABLE = "Service is unavailable";
+    public static final String RESPONSE_BODY_IS_NOT_A_VALID_JSON = "response body is not a valid Json";
     private static final String baseUrl = "https://sv443.net/jokeapi/v2";
     private static final String anyJokePath = "/joke/Any";
+    private static final String jokeCategoriesPath = "/categories";
 
     private RestTemplate restTemplate;
     private ObjectMapper objectMapper;
@@ -29,12 +33,7 @@ public class Sv443JokeProvider implements ExternalJokeProvider {
 
     @Override
     public Joke getRandomJoke() throws JokeException {
-        final ResponseEntity<String> responseEntity = restTemplate.getForEntity(baseUrl + anyJokePath, String.class);
-
-        if (responseEntity.getStatusCode() != HttpStatus.OK) {
-            throw new JokeException("service is unavailable");
-        }
-        final String body = responseEntity.getBody();
+        final String body = getResponseBodyOrThrow(baseUrl + anyJokePath, String.class);
         return extractJoke(body);
     }
 
@@ -45,7 +44,17 @@ public class Sv443JokeProvider implements ExternalJokeProvider {
 
     @Override
     public Set<String> getAvailableCategories() {
-        return new HashSet<>();
+        final String categoriesJson = getResponseBodyOrThrow(baseUrl + jokeCategoriesPath, String.class);
+        return extractCategories(categoriesJson);
+    }
+
+    private <T> T getResponseBodyOrThrow(final String url, final Class<T> aClass) throws JokeException {
+        final ResponseEntity<T> responseEntity = restTemplate.getForEntity(url, aClass);
+
+        if (responseEntity.getStatusCode() != HttpStatus.OK) {
+            throw new JokeException(SERVICE_IS_UNAVAILABLE);
+        }
+        return responseEntity.getBody();
     }
 
     private Joke extractJoke(final String responseBody) {
@@ -60,7 +69,21 @@ public class Sv443JokeProvider implements ExternalJokeProvider {
             }
             return new Joke(joke, category);
         } catch (JsonProcessingException e) {
-            throw new JokeException("response body is not a valid Json");
+            throw new JokeException(RESPONSE_BODY_IS_NOT_A_VALID_JSON);
+        }
+    }
+
+    private Set<String> extractCategories(final String responseBody) {
+        try {
+            final JsonNode jsonNode = objectMapper.readTree(responseBody);
+            final ArrayNode categoriesArrayNode = (ArrayNode) (jsonNode.get("categories"));
+            Set<String> categories = new HashSet<>();
+            for (int i = 0; i < categoriesArrayNode.size(); i++) {
+                categories.add(categoriesArrayNode.get(i).asText());
+            }
+            return categories;
+        } catch (JsonProcessingException e) {
+            throw new JokeException(RESPONSE_BODY_IS_NOT_A_VALID_JSON);
         }
     }
 }
